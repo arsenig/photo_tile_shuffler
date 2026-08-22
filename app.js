@@ -64,10 +64,6 @@
     onChange: updateInfo,
   });
 
-  function currentEligible(grid) {
-    return Core.eligibleTilesFromStrokes(grid, preview.getStrokes());
-  }
-
   function readParams() {
     return {
       hor: Number(els.hor.value),
@@ -104,10 +100,10 @@
     const grid = Core.calculateGrid(imageDims.width, imageDims.height, hor, ver);
     preview.setGrid(grid);
 
-    const eligible = currentEligible(grid);
+    const eligible = preview.getEligibleTiles();
     const poolSize = eligible == null ? grid.tiles : eligible.length;
     const affected = chaosOk ? Core.affectedTileCount(poolSize, chaos) : 0;
-    const rawAffected = chaosOk ? Math.floor(poolSize * chaos) : 0;
+    const rawAffected = chaosOk ? Core.rawAffectedTileCount(poolSize, chaos) : 0;
 
     function noteHtml(text) {
       return '<p class="note">' + text + "</p>";
@@ -293,10 +289,12 @@
     const rng =
       seed === null ? Core.createUnseededRng() : Core.createRng(seed);
 
+    // Keep the preview mask in step with the grid we are about to generate from.
+    preview.setGrid(grid);
+
     els.generate.disabled = true;
     setStatus(`Generating ${nOut} variant(s)…`);
 
-    let unchangedNoteShown = false;
     let unchangedReason = "";
     let subtleUnavailable = false;
 
@@ -308,7 +306,7 @@
         nOut,
         rng,
         subtle,
-        eligible: currentEligible(grid),
+        eligible: preview.getEligibleTiles(),
         onProgress({ current, total }) {
           setStatus(`Generating variant ${current} of ${total}…`);
         },
@@ -323,8 +321,7 @@
           );
           appendVariantCard(index, objectUrl, filename, plan, blob);
 
-          if (!plan.moved && plan.reason && !unchangedNoteShown) {
-            unchangedNoteShown = true;
+          if (!plan.moved && plan.reason && !unchangedReason) {
             unchangedReason = plan.reason;
           }
           if (subtle && plan.moved && plan.pairing !== "similar") {

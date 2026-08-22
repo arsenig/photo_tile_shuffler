@@ -53,6 +53,8 @@
     let selected = new Set();
     /** True when paint strokes exist but none ever hit a tile (crop strip only). */
     let cropOnlyPaint = false;
+    /** Last result of `Core.eligibleTilesFromStrokes`; null = no mask (all tiles). */
+    let eligible = null;
 
     let checkerPattern = null;
     let checkerKey = "";
@@ -127,11 +129,23 @@
       return checkerPattern;
     }
 
+    /** Drop every stroke and the mask derived from it. */
+    function resetMask() {
+      strokes = [];
+      currentStroke = null;
+      selected = new Set();
+      cropOnlyPaint = false;
+      eligible = null;
+    }
+
+    /**
+     * Recompute the mask from the strokes. Single place where strokes are turned
+     * into tile indices — `getEligibleTiles` serves the cached result to the app.
+     */
     function rebuildSelection() {
       selected = new Set();
       cropOnlyPaint = false;
-      if (!grid || !Core) return;
-      const eligible = Core.eligibleTilesFromStrokes(grid, strokes);
+      eligible = grid ? Core.eligibleTilesFromStrokes(grid, strokes) : null;
       if (eligible == null) return;
       if (eligible.length === 0) {
         cropOnlyPaint = true;
@@ -140,17 +154,13 @@
       for (let i = 0; i < eligible.length; i++) selected.add(eligible[i]);
     }
 
+    /**
+     * Tile indices the brush selected for the grid last passed to `setGrid`,
+     * or null when no mask is active (all tiles eligible).
+     * @returns {number[]|null}
+     */
     function getEligibleTiles() {
-      if (!grid || !Core) return null;
-      return Core.eligibleTilesFromStrokes(grid, strokes);
-    }
-
-    function getStrokes() {
-      return strokes;
-    }
-
-    function hasPaint() {
-      return selected.size > 0 || cropOnlyPaint;
+      return eligible;
     }
 
     function resizeCanvases() {
@@ -342,12 +352,9 @@
       image = img;
       imageWidth = dims.width;
       imageHeight = dims.height;
-      strokes = [];
-      currentStroke = null;
       hover = null;
       hoverErase = false;
-      selected = new Set();
-      cropOnlyPaint = false;
+      resetMask();
       stage.hidden = false;
       resizeCanvases();
       onChange();
@@ -358,12 +365,9 @@
       imageWidth = 0;
       imageHeight = 0;
       grid = null;
-      strokes = [];
-      currentStroke = null;
       hover = null;
       hoverErase = false;
-      selected = new Set();
-      cropOnlyPaint = false;
+      resetMask();
       stage.hidden = true;
     }
 
@@ -374,10 +378,7 @@
     }
 
     function clearSelection() {
-      strokes = [];
-      currentStroke = null;
-      selected = new Set();
-      cropOnlyPaint = false;
+      resetMask();
       drawOverlay();
       onChange();
     }
@@ -480,11 +481,7 @@
       setImage,
       clearImage,
       setGrid,
-      clearSelection,
       getEligibleTiles,
-      getStrokes,
-      hasPaint,
-      resize: resizeCanvases,
     };
   }
 

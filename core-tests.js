@@ -5,6 +5,45 @@
 (function (global) {
   "use strict";
 
+  /**
+   * Result collector shared by the browser and Node runners; only the rendering
+   * of `lines` differs between them.
+   * @returns {{
+   *   assert: (name: string, cond: boolean, detail?: string) => void,
+   *   lines: string[],
+   *   failed: () => number,
+   *   summary: () => string
+   * }}
+   */
+  function createReporter() {
+    const lines = [];
+    let passed = 0;
+    let failed = 0;
+
+    function assert(name, cond, detail) {
+      if (cond) {
+        passed++;
+        lines.push("PASS  " + name);
+      } else {
+        failed++;
+        lines.push("FAIL  " + name + (detail ? " — " + detail : ""));
+      }
+    }
+
+    return {
+      assert,
+      lines,
+      failed: function () {
+        return failed;
+      },
+      summary: function () {
+        return failed === 0
+          ? "All " + passed + " tests passed."
+          : passed + " passed, " + failed + " failed.";
+      },
+    };
+  }
+
   function countMoved(sourceForDest) {
     let moved = 0;
     for (let i = 0; i < sourceForDest.length; i++) {
@@ -64,6 +103,7 @@
     }
 
     {
+      assert("Single: raw budget is 1", C.rawAffectedTileCount(10, 0.1) === 1);
       assert("Single: floor(10×0.10)=1 → count 0", C.affectedTileCount(10, 0.1) === 0);
       const plan = C.planShuffle(10, 0.1, C.createRng(3));
       assert("Single: no moves", plan.affectedCount === 0 && !plan.moved);
@@ -373,7 +413,7 @@
     }
   }
 
-  const api = { run };
+  const api = { run, createReporter };
 
   global.PhotoShuffleCoreTests = api;
 

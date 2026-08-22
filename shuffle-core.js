@@ -104,12 +104,20 @@
   }
 
   /**
+   * CHAOS budget before the single-tile rule is applied. Only useful for
+   * explaining *why* nothing moved (raw 1 reads differently from raw 0).
+   */
+  function rawAffectedTileCount(poolSize, chaos) {
+    return Math.floor(poolSize * chaos);
+  }
+
+  /**
    * Number of tiles allowed to move under CHAOS, with the single-tile rule.
    * `poolSize` is TILES when no brush is used, or the count of brush-touched tiles.
    * Returns 0 when a derangement is impossible without exceeding CHAOS.
    */
   function affectedTileCount(poolSize, chaos) {
-    const n = Math.floor(poolSize * chaos);
+    const n = rawAffectedTileCount(poolSize, chaos);
     if (n < 2) return 0;
     return n;
   }
@@ -320,6 +328,32 @@
   }
 
   /**
+   * Guard shared by both derangement builders: one tile cannot move on its own
+   * without dragging a second, uncounted tile along and breaking the CHAOS ceiling.
+   * @param {number} k number of selected tiles
+   */
+  function assertDerangeable(k) {
+    if (k === 1) {
+      throw new Error("Cannot derange a single tile without exceeding CHAOS.");
+    }
+  }
+
+  /**
+   * Last line of defence for both derangement builders: a fixed point would mean
+   * a tile counted as affected did not actually move.
+   * @param {Map<number, number>} map
+   * @returns {Map<number, number>} the same map
+   */
+  function assertNoFixedPoints(map) {
+    map.forEach(function (source, dest) {
+      if (source === dest) {
+        throw new Error("Internal error: derangement produced a fixed point.");
+      }
+    });
+    return map;
+  }
+
+  /**
    * True when every selected tile has a usable descriptor.
    * @param {number[]} selected
    * @param {ArrayLike<number[]>|null|undefined} descriptors
@@ -354,9 +388,7 @@
   function createSimilarityDerangementMap(selected, descriptors, rng) {
     const k = selected.length;
     if (k === 0) return new Map();
-    if (k === 1) {
-      throw new Error("Cannot derange a single tile without exceeding CHAOS.");
-    }
+    assertDerangeable(k);
     if (!hasDescriptorsFor(selected, descriptors)) {
       return createDerangementMap(selected, rng);
     }
@@ -414,12 +446,7 @@
       map.set(b, leftover);
     }
 
-    map.forEach(function (source, dest) {
-      if (source === dest) {
-        throw new Error("Internal error: derangement produced a fixed point.");
-      }
-    });
-    return map;
+    return assertNoFixedPoints(map);
   }
 
   /**
@@ -433,23 +460,16 @@
   function createDerangementMap(selected, rng) {
     const k = selected.length;
     if (k === 0) return new Map();
-    if (k === 1) {
-      throw new Error("Cannot derange a single tile without exceeding CHAOS.");
-    }
+    assertDerangeable(k);
 
     const slots = range(k);
     sattoloShuffle(slots, rng);
 
     const map = new Map();
     for (let i = 0; i < k; i++) {
-      const dest = selected[i];
-      const source = selected[slots[i]];
-      if (dest === source) {
-        throw new Error("Internal error: derangement produced a fixed point.");
-      }
-      map.set(dest, source);
+      map.set(selected[i], selected[slots[i]]);
     }
-    return map;
+    return assertNoFixedPoints(map);
   }
 
   /**
@@ -516,7 +536,7 @@
       );
     }
 
-    const raw = Math.floor(eligibleCount * chaos);
+    const raw = rawAffectedTileCount(eligibleCount, chaos);
     const affectedCount = affectedTileCount(eligibleCount, chaos);
 
     if (affectedCount === 0) {
@@ -631,6 +651,7 @@
     parseSeed,
     calculateGrid,
     tileOrigin,
+    rawAffectedTileCount,
     affectedTileCount,
     circleIntersectsRect,
     eligibleTilesFromStamps,

@@ -29,37 +29,20 @@
   <script src="core-tests.js"></script>
   <script>
     (function () {
-      const C = window.PhotoShuffleCore;
-      const out = document.getElementById("out");
-      const summary = document.getElementById("summary");
-      let passed = 0;
-      let failed = 0;
-      const lines = [];
+      const Tests = window.PhotoShuffleCoreTests;
+      const reporter = Tests.createReporter();
+      Tests.run(window.PhotoShuffleCore, reporter.assert);
 
-      function assert(name, cond, detail) {
-        if (cond) {
-          passed++;
-          lines.push("PASS  " + name);
-        } else {
-          failed++;
-          lines.push("FAIL  " + name + (detail ? " — " + detail : ""));
-        }
-      }
-
-      window.PhotoShuffleCoreTests.run(C, assert);
-
-      out.innerHTML = lines
+      document.getElementById("out").innerHTML = reporter.lines
         .map(function (l) {
           const cls = l.startsWith("PASS") ? "pass" : "fail";
           return '<span class="' + cls + '">' + l.replace(/</g, "&lt;") + "</span>";
         })
         .join("\n");
 
-      summary.textContent =
-        failed === 0
-          ? "All " + passed + " tests passed."
-          : passed + " passed, " + failed + " failed.";
-      summary.className = failed === 0 ? "pass" : "fail";
+      const summary = document.getElementById("summary");
+      summary.textContent = reporter.summary();
+      summary.className = reporter.failed() ? "fail" : "pass";
     })();
   </script>
 </body>

@@ -50,13 +50,17 @@ Out of scope: platform-native apps, servers, frameworks, bundlers.
 | `app.js` | UI wiring only (file pick, preview/brush events, validation display, generate loop callbacks, downloads) |
 | `shuffle-core.js` | Pure algorithm: grid, CHAOS math, brush-eligible tiles, selection, derangement (random + similarity-guided), descriptor distance, seed/RNG, filenames, validation |
 | `shuffle-image.js` | Browser image I/O: load, per-tile colour descriptors, render tiles to canvas, JPEG encode, sequential multi-variant generation |
-| `preview.js` | Input photo preview, grid overlay, round brush paint/erase, tile-snapped mask |
-| `core-tests.js` | Shared PhotoShuffleCore assertions (browser + Node) |
+| `preview.js` | Input photo preview, grid overlay, round brush paint/erase, tile-snapped mask; **owns** the stroke → eligible-tile mask |
+| `core-tests.js` | Shared PhotoShuffleCore assertions + the reporter both runners use |
 | `tests.html` | In-browser runner for `core-tests.js` |
 | `run-tests.js` | Node runner (`node run-tests.js`) |
 | `PROJECT.MD` | This document |
 
 Keep algorithm logic out of `app.js`. Core must remain unit-testable without DOM/canvas.
+
+`preview.js` is the only place that turns strokes into tile indices: it recomputes the mask whenever strokes or the grid change and caches the result, and `app.js` reads it through `preview.getEligibleTiles()`. Do not re-derive eligibility from raw strokes elsewhere — two derivations can disagree.
+
+`core-tests.js` also exports `createReporter()` (assert / pass-fail counting / summary line) so `tests.html` and `run-tests.js` only differ in how they render the collected lines.
 
 ---
 
@@ -251,7 +255,7 @@ Core tests live in `core-tests.js` (see `tests.html` / `run-tests.js`) and cover
 ## Design decisions to preserve
 
 1. **Vanilla JS + classic scripts** — portable `file://` copy to Mac; no npm/build required for the app itself.
-2. **Separation: core / image / UI** — keep `planShuffle` and friends pure.
+2. **Separation: core / image / UI** — keep `planShuffle` and friends pure, and keep each derived value (the brush mask, the CHAOS budget, the test reporter) owned by exactly one module.
 3. **Sattolo derangement** — guaranteed no fixed points among selected tiles (n ≥ 2); do not use a plain Fisher–Yates that can leave tiles unmoved. Subtle chaos builds its own derangement (pairs + one optional 3-cycle) and carries the same guarantee.
 4. **Subtle chaos is a pairing strategy, nothing more** — it must never touch selection, eligibility, the CHAOS ceiling, resolution, or encode settings. Off ⇒ byte-identical behaviour to the pre-feature app.
 5. **CHAOS ceiling is hard** — never “round up” moves; the one-tile case becomes zero moves with an explanation.
