@@ -13,6 +13,7 @@
     ver: document.getElementById("ver"),
     chaos: document.getElementById("chaos"),
     chaosValue: document.getElementById("chaosValue"),
+    subtleChaos: document.getElementById("subtleChaos"),
     nOut: document.getElementById("nOut"),
     seed: document.getElementById("seed"),
     generate: document.getElementById("generate"),
@@ -74,6 +75,7 @@
       chaos: Number(els.chaos.value),
       nOut: Number(els.nOut.value),
       seedRaw: els.seed.value,
+      subtle: els.subtleChaos.checked,
     };
   }
 
@@ -88,7 +90,7 @@
       return;
     }
 
-    const { hor, ver, chaos } = readParams();
+    const { hor, ver, chaos, subtle } = readParams();
     const horOk = Number.isInteger(hor) && hor >= 1;
     const verOk = Number.isInteger(ver) && ver >= 1;
     const chaosOk = typeof chaos === "number" && !Number.isNaN(chaos);
@@ -148,6 +150,7 @@
         <li>Tile size: ${grid.tileWidth} × ${grid.tileHeight}</li>
         <li>Eligible tiles: ${eligible == null ? grid.tiles + " (all)" : eligible.length + " (painted)"}</li>
         <li>CHAOS: ${chaosOk ? chaos.toFixed(2) : "—"}</li>
+        <li>Subtle chaos: ${subtle ? "on (swap similar tiles)" : "off (random swaps)"}</li>
         <li>Affected tiles: ${chaosOk ? affected : "—"}</li>
         ${cropNote}
       </ul>
@@ -217,7 +220,11 @@
     const meta = document.createElement("p");
     meta.className = "meta";
     if (plan.moved) {
-      meta.textContent = `Moved ${plan.affectedCount} tiles`;
+      const how =
+        plan.pairing === "similar"
+          ? " (swapped with visually similar tiles)"
+          : "";
+      meta.textContent = `Moved ${plan.affectedCount} tiles${how}`;
     } else {
       meta.textContent = plan.reason || "Unchanged";
     }
@@ -274,7 +281,7 @@
       return;
     }
 
-    const { hor, ver, chaos, nOut } = params;
+    const { hor, ver, chaos, nOut, subtle } = params;
     const grid = Core.calculateGrid(imageDims.width, imageDims.height, hor, ver);
 
     if (grid.tileWidth < 1 || grid.tileHeight < 1) {
@@ -291,6 +298,7 @@
 
     let unchangedNoteShown = false;
     let unchangedReason = "";
+    let subtleUnavailable = false;
 
     try {
       await Img.generateVariants({
@@ -299,6 +307,7 @@
         chaos,
         nOut,
         rng,
+        subtle,
         eligible: currentEligible(grid),
         onProgress({ current, total }) {
           setStatus(`Generating variant ${current} of ${total}…`);
@@ -318,11 +327,18 @@
             unchangedNoteShown = true;
             unchangedReason = plan.reason;
           }
+          if (subtle && plan.moved && plan.pairing !== "similar") {
+            subtleUnavailable = true;
+          }
         },
       });
 
       let doneMsg = `Done — ${nOut} variant(s) ready. Save each as needed.`;
       if (unchangedReason) doneMsg += " " + unchangedReason;
+      if (subtleUnavailable) {
+        doneMsg +=
+          " Tile colours could not be read, so subtle chaos fell back to random swaps.";
+      }
       setStatus(doneMsg);
     } catch (e) {
       setError(e.message || String(e));
@@ -339,6 +355,7 @@
     updateChaosLabel();
     updateInfo();
   });
+  els.subtleChaos.addEventListener("change", updateInfo);
   els.generate.addEventListener("click", onGenerate);
 
   updateChaosLabel();

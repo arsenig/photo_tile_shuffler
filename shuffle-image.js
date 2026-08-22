@@ -103,6 +103,81 @@
   }
 
   /**
+   * Average colour of every tile, as `[r, g, b]` in 0–255, indexed by tile index.
+   *
+   * Rendered on a throwaway hor×ver canvas — one pixel per tile — so the export
+   * pipeline is untouched. Downscaling proceeds by halving because a single
+   * huge-to-tiny `drawImage` aliases badly in some browsers and would sample a
+   * few pixels instead of averaging the tile.
+   *
+   * @param {CanvasImageSource} sourceImage
+   * @param {ReturnType<typeof Core.calculateGrid>} grid
+   * @returns {number[][]|null} null when pixels cannot be read (tainted canvas)
+   */
+  function computeTileDescriptors(sourceImage, grid) {
+    const { hor, ver, cropWidth, cropHeight, tiles } = grid;
+    if (!(cropWidth > 0) || !(cropHeight > 0)) return null;
+
+    function scratch(w, h) {
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext("2d", { alpha: false });
+      if (!cx) throw new Error("Could not get 2D canvas context.");
+      cx.imageSmoothingEnabled = true;
+      cx.imageSmoothingQuality = "high";
+      return { canvas: c, ctx: cx };
+    }
+
+    try {
+      let src = sourceImage;
+      let sx = 0;
+      let sy = 0;
+      let sw = cropWidth;
+      let sh = cropHeight;
+      /** @type {HTMLCanvasElement|null} */
+      let previous = null;
+
+      while (sw > hor * 2 || sh > ver * 2) {
+        const nextW = Math.max(hor, Math.floor(sw / 2));
+        const nextH = Math.max(ver, Math.floor(sh / 2));
+        if (nextW === sw && nextH === sh) break;
+        const step = scratch(nextW, nextH);
+        step.ctx.drawImage(src, sx, sy, sw, sh, 0, 0, nextW, nextH);
+        if (previous) {
+          previous.width = 0;
+          previous.height = 0;
+        }
+        previous = step.canvas;
+        src = step.canvas;
+        sx = 0;
+        sy = 0;
+        sw = nextW;
+        sh = nextH;
+      }
+
+      const tiny = scratch(hor, ver);
+      tiny.ctx.drawImage(src, sx, sy, sw, sh, 0, 0, hor, ver);
+      if (previous) {
+        previous.width = 0;
+        previous.height = 0;
+      }
+
+      const data = tiny.ctx.getImageData(0, 0, hor, ver).data;
+      const out = new Array(tiles);
+      for (let i = 0; i < tiles; i++) {
+        const p = i * 4;
+        out[i] = [data[p], data[p + 1], data[p + 2]];
+      }
+      tiny.canvas.width = 0;
+      tiny.canvas.height = 0;
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
    * Encode canvas to JPEG Blob once.
    * @param {HTMLCanvasElement} canvas
    * @param {number} [quality]
@@ -146,6 +221,7 @@
    * @param {number} options.nOut
    * @param {() => number} options.rng
    * @param {number[]|null} [options.eligible] brush-touched tile indices, or null for all
+   * @param {boolean} [options.subtle] pair tiles by visual similarity instead of at random
    * @param {number} [options.jpegQuality]
    * @param {(info: {
    *   index: number,
@@ -163,17 +239,20 @@
       nOut,
       rng,
       eligible,
+      subtle,
       jpegQuality,
       onVariant,
       onProgress,
     } = options;
 
     const canvas = document.createElement("canvas");
+    // Descriptors depend on the image and grid only — compute once for all variants.
+    const descriptors = subtle ? computeTileDescriptors(sourceImage, grid) : null;
 
     for (let i = 0; i < nOut; i++) {
       if (onProgress) onProgress({ current: i + 1, total: nOut });
 
-      const plan = Core.planShuffle(grid.tiles, chaos, rng, eligible);
+      const plan = Core.planShuffle(grid.tiles, chaos, rng, eligible, { descriptors });
       renderShuffledImage(sourceImage, grid, plan.sourceForDest, canvas);
       const blob = await encodeJpeg(canvas, jpegQuality);
       const objectUrl = URL.createObjectURL(blob);
@@ -196,6 +275,7 @@
     isJpegFile,
     loadImageOriented,
     imageSize,
+    computeTileDescriptors,
     renderShuffledImage,
     encodeJpeg,
     releaseImage,

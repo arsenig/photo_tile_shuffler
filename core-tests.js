@@ -227,6 +227,144 @@
     }
 
     {
+      // Two tight clusters: dark tiles 0..9, bright tiles 10..19.
+      function brightness(i) {
+        return i < 10 ? [20 + i, 20 + i, 20 + i] : [200 + (i - 10), 200 + (i - 10), 200 + (i - 10)];
+      }
+      const gray = Array.from({ length: 20 }, (_, i) => brightness(i));
+      const selected = Array.from({ length: 20 }, (_, i) => i);
+      const map = C.createSimilarityDerangementMap(selected, gray, C.createRng(11));
+      let crossCluster = 0;
+      map.forEach(function (source, dest) {
+        if (dest < 10 !== source < 10) crossCluster++;
+      });
+      assert("Subtle gray: all 20 tiles mapped", map.size === 20);
+      assert("Subtle gray: swaps stay inside brightness cluster", crossCluster === 0);
+      C.assertPermutationValid(selected, C.buildSourceForDest(20, map));
+      assert("Subtle gray: permutation valid", true);
+    }
+
+    {
+      // Sky / grass / brick: similar luminance, clearly different hue.
+      const palette = [
+        [70, 130, 220],
+        [80, 170, 90],
+        [190, 70, 60],
+      ];
+      const colors = Array.from({ length: 30 }, (_, i) => palette[i % 3]);
+      const selected = Array.from({ length: 30 }, (_, i) => i);
+      const map = C.createSimilarityDerangementMap(selected, colors, C.createRng(23));
+      let crossColor = 0;
+      map.forEach(function (source, dest) {
+        if (dest % 3 !== source % 3) crossColor++;
+      });
+      assert("Subtle color: swaps keep the same hue group", crossColor === 0);
+      assert(
+        "Subtle color: nothing stays put",
+        Array.from(map.keys()).every((dest) => map.get(dest) !== dest)
+      );
+    }
+
+    {
+      // Odd counts cannot pair up cleanly; the leftover must still move.
+      const desc = [[0], [1], [200]];
+      const map = C.createSimilarityDerangementMap([0, 1, 2], desc, C.createRng(5));
+      assert("Subtle odd: 3 tiles form a cycle", map.size === 3);
+      assert(
+        "Subtle odd: leftover tile still moves",
+        map.get(0) !== 0 && map.get(1) !== 1 && map.get(2) !== 2
+      );
+      C.assertPermutationValid([0, 1, 2], C.buildSourceForDest(3, map));
+      assert("Subtle odd: permutation valid", true);
+    }
+
+    {
+      // No cluster at all: every tile is far from every other, but all must move.
+      const desc = Array.from({ length: 7 }, (_, i) => [i * 1000]);
+      const selected = [0, 1, 2, 3, 4, 5, 6];
+      const map = C.createSimilarityDerangementMap(selected, desc, C.createRng(31));
+      assert("Subtle fallback: every tile still swapped", map.size === 7);
+      C.assertPermutationValid(selected, C.buildSourceForDest(7, map));
+      assert("Subtle fallback: permutation valid", true);
+    }
+
+    {
+      const desc = Array.from({ length: 64 }, (_, i) => [i < 32 ? 10 : 240]);
+      const plain = C.planShuffle(64, 0.5, C.createRng(77));
+      const subtle = C.planShuffle(64, 0.5, C.createRng(77), null, { descriptors: desc });
+      assert("Subtle plan: same affected count", subtle.affectedCount === plain.affectedCount);
+      assert("Subtle plan: same selected tiles", JSON.stringify(subtle.selected) === JSON.stringify(plain.selected));
+      assert("Subtle plan: reports similar pairing", subtle.pairing === "similar");
+      assert("Plain plan: reports random pairing", plain.pairing === "random");
+      C.assertPermutationValid(subtle.selected, subtle.sourceForDest);
+      assert("Subtle plan: permutation valid", true);
+
+      function totalDistance(plan) {
+        let sum = 0;
+        for (const dest of plan.selected) {
+          sum += C.descriptorDistance(desc[dest], desc[plan.sourceForDest[dest]]);
+        }
+        return sum;
+      }
+      assert("Subtle plan: lower descriptor distance than random", totalDistance(subtle) < totalDistance(plain));
+    }
+
+    {
+      const desc = Array.from({ length: 40 }, (_, i) => [(i * 37) % 256]);
+      const a = C.planShuffle(40, 0.5, C.createRng(4242), null, { descriptors: desc });
+      const b = C.planShuffle(40, 0.5, C.createRng(4242), null, { descriptors: desc });
+      assert(
+        "Subtle plan: seed reproducible",
+        JSON.stringify(a.sourceForDest) === JSON.stringify(b.sourceForDest)
+      );
+      const rng = C.createRng(4242);
+      const v1 = C.planShuffle(40, 0.5, rng, null, { descriptors: desc });
+      const v2 = C.planShuffle(40, 0.5, rng, null, { descriptors: desc });
+      assert(
+        "Subtle plan: consecutive variants differ",
+        JSON.stringify(v1.sourceForDest) !== JSON.stringify(v2.sourceForDest)
+      );
+    }
+
+    {
+      const partial = [];
+      partial[0] = [1];
+      const plan = C.planShuffle(20, 1, C.createRng(8), null, { descriptors: partial });
+      assert("Subtle plan: missing descriptors → random fallback", plan.pairing === "random");
+      assert("Subtle plan: fallback still moves every tile", plan.affectedCount === 20);
+      C.assertPermutationValid(plan.selected, plan.sourceForDest);
+      assert("Subtle plan: fallback permutation valid", true);
+    }
+
+    {
+      const desc = Array.from({ length: 20 }, (_, i) => [i]);
+      const plan = C.planShuffle(20, 1, C.createRng(6), [3, 8, 14], { descriptors: desc });
+      assert("Subtle plan: respects brush mask", plan.affectedCount === 3);
+      assert(
+        "Subtle plan: unmasked tiles stay",
+        plan.sourceForDest.every((s, i) => [3, 8, 14].includes(i) || s === i)
+      );
+      C.assertPermutationValid(plan.selected, plan.sourceForDest);
+      assert("Subtle plan: masked permutation valid", true);
+    }
+
+    {
+      assert(
+        "descriptorDistance: identical → 0",
+        C.descriptorDistance([10, 20, 30], [10, 20, 30]) === 0
+      );
+      assert(
+        "descriptorDistance: closer brightness wins",
+        C.descriptorDistance([100, 100, 100], [110, 110, 110]) <
+          C.descriptorDistance([100, 100, 100], [200, 200, 200])
+      );
+      assert(
+        "descriptorDistance: missing descriptor → Infinity",
+        C.descriptorDistance(null, [1, 2, 3]) === Infinity
+      );
+    }
+
+    {
       assert("parseSeed empty → null", C.parseSeed("") === null);
       assert("parseSeed 42", C.parseSeed("42") === 42);
       const h1 = C.parseSeed("abc");

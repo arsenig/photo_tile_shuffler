@@ -280,6 +280,149 @@
   }
 
   /**
+   * Fisher–Yates shuffle (fixed points allowed). Mutates `arr` in place.
+   * @param {number[]} arr
+   * @param {() => number} rng
+   */
+  function shuffleInPlace(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      swap(arr, i, Math.floor(rng() * (i + 1))); // 0 .. i inclusive
+    }
+    return arr;
+  }
+
+  /**
+   * Squared distance between two tile descriptors (see `descriptors` on
+   * `planShuffle`). Length-3 descriptors are read as RGB with luma weights; a
+   * grayscale tile has r == g == b, so the result then reduces to a monotone
+   * function of the brightness difference. Other lengths use plain squared
+   * distance, which covers single-channel brightness descriptors.
+   *
+   * @param {number[]} a
+   * @param {number[]} b
+   * @returns {number}
+   */
+  function descriptorDistance(a, b) {
+    if (!a || !b) return Infinity;
+    if (a.length === 3 && b.length === 3) {
+      const dr = a[0] - b[0];
+      const dg = a[1] - b[1];
+      const db = a[2] - b[2];
+      return 0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db;
+    }
+    const n = Math.min(a.length, b.length);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const d = a[i] - b[i];
+      sum += d * d;
+    }
+    return sum;
+  }
+
+  /**
+   * True when every selected tile has a usable descriptor.
+   * @param {number[]} selected
+   * @param {ArrayLike<number[]>|null|undefined} descriptors
+   */
+  function hasDescriptorsFor(selected, descriptors) {
+    if (!descriptors) return false;
+    for (let i = 0; i < selected.length; i++) {
+      const d = descriptors[selected[i]];
+      if (!d || typeof d.length !== "number" || d.length === 0) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Similarity-guided variant of `createDerangementMap`: same selected tiles,
+   * same "everyone moves" guarantee, but partners are chosen by descriptor
+   * distance instead of at random.
+   *
+   * Greedy nearest-neighbour matching over a randomized visiting order:
+   * each unpaired tile takes the most similar still-unpaired tile as its swap
+   * partner, so a tile with no close match still gets the closest one left.
+   * With an odd count the final tile joins its most similar pair as a 3-cycle.
+   * The random visiting order is what keeps N_OUT variants distinct.
+   *
+   * Falls back to the random derangement when descriptors are unavailable.
+   *
+   * @param {number[]} selected unique tile indices (>= 2)
+   * @param {ArrayLike<number[]>|null} descriptors indexed by tile index
+   * @param {() => number} rng
+   * @returns {Map<number, number>} destinationIndex → sourceIndex
+   */
+  function createSimilarityDerangementMap(selected, descriptors, rng) {
+    const k = selected.length;
+    if (k === 0) return new Map();
+    if (k === 1) {
+      throw new Error("Cannot derange a single tile without exceeding CHAOS.");
+    }
+    if (!hasDescriptorsFor(selected, descriptors)) {
+      return createDerangementMap(selected, rng);
+    }
+
+    const order = shuffleInPlace(selected.slice(), rng);
+    const paired = new Array(k).fill(false);
+    /** @type {[number, number][]} */
+    const pairs = [];
+    let leftover = -1;
+
+    for (let i = 0; i < k; i++) {
+      if (paired[i]) continue;
+      let best = -1;
+      let bestDist = Infinity;
+      for (let j = i + 1; j < k; j++) {
+        if (paired[j]) continue;
+        const d = descriptorDistance(descriptors[order[i]], descriptors[order[j]]);
+        if (d < bestDist) {
+          bestDist = d;
+          best = j;
+        }
+      }
+      if (best === -1) {
+        leftover = order[i]; // odd count: nothing left to pair with
+        break;
+      }
+      paired[i] = true;
+      paired[best] = true;
+      pairs.push([order[i], order[best]]);
+    }
+
+    const map = new Map();
+    for (let i = 0; i < pairs.length; i++) {
+      map.set(pairs[i][0], pairs[i][1]);
+      map.set(pairs[i][1], pairs[i][0]);
+    }
+
+    if (leftover >= 0) {
+      let bestPair = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < pairs.length; i++) {
+        const d = Math.min(
+          descriptorDistance(descriptors[leftover], descriptors[pairs[i][0]]),
+          descriptorDistance(descriptors[leftover], descriptors[pairs[i][1]])
+        );
+        if (d < bestDist) {
+          bestDist = d;
+          bestPair = i;
+        }
+      }
+      const a = pairs[bestPair][0];
+      const b = pairs[bestPair][1];
+      map.set(leftover, a);
+      map.set(a, b);
+      map.set(b, leftover);
+    }
+
+    map.forEach(function (source, dest) {
+      if (source === dest) {
+        throw new Error("Internal error: derangement produced a fixed point.");
+      }
+    });
+    return map;
+  }
+
+  /**
    * Build a dest→source map for selected positions (derangement among selected only).
    * Unselected positions are omitted (identity implied).
    *
@@ -323,20 +466,30 @@
 
   /**
    * One independent shuffle plan for a single output variant.
+   *
+   * `options.descriptors` (one small numeric vector per tile index, e.g. average
+   * RGB) switches partner selection to similarity-guided pairing — "subtle
+   * chaos". Everything else (affected count, CHAOS ceiling, eligibility, the
+   * guarantee that every selected tile moves) is identical either way.
+   *
    * @param {number} tiles
    * @param {number} chaos
    * @param {() => number} rng
    * @param {number[]|null|undefined} eligible  null/undefined = all tiles
+   * @param {{ descriptors?: ArrayLike<number[]>|null }} [options]
    * @returns {{
    *   affectedCount: number,
    *   selected: number[],
    *   sourceForDest: number[],
    *   moved: boolean,
    *   eligibleCount: number,
+   *   pairing: "none" | "random" | "similar",
    *   reason?: string
    * }}
    */
-  function planShuffle(tiles, chaos, rng, eligible) {
+  function planShuffle(tiles, chaos, rng, eligible, options) {
+    const descriptors = (options && options.descriptors) || null;
+
     function unchanged(eligibleCount, reason) {
       return {
         affectedCount: 0,
@@ -344,6 +497,7 @@
         sourceForDest: range(tiles),
         moved: false,
         eligibleCount,
+        pairing: "none",
         reason,
       };
     }
@@ -374,13 +528,17 @@
     }
 
     const selected = selectFromPool(pool, affectedCount, rng);
-    const map = createDerangementMap(selected, rng);
+    const similar = hasDescriptorsFor(selected, descriptors);
+    const map = similar
+      ? createSimilarityDerangementMap(selected, descriptors, rng)
+      : createDerangementMap(selected, rng);
     return {
       affectedCount,
       selected,
       sourceForDest: buildSourceForDest(tiles, map),
       moved: true,
       eligibleCount,
+      pairing: similar ? "similar" : "random",
     };
   }
 
@@ -481,7 +639,11 @@
     resolveEligibleIndices,
     selectFromPool,
     sattoloShuffle,
+    shuffleInPlace,
+    descriptorDistance,
+    hasDescriptorsFor,
     createDerangementMap,
+    createSimilarityDerangementMap,
     buildSourceForDest,
     planShuffle,
     validateParams,
