@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Photo Tile Shuffle</title>
+  <style>
+    :root {
+      --bg: #1a1c1e;
+      --panel: #24282c;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #5b9fd4;
+      --accent-hover: #7ab3de;
+      --danger: #e57373;
+      --border: #3c434a;
+      --note: #c9b458;
+      --radius: 6px;
+      --font: "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      padding: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+
+    .lede {
+      color: var(--muted);
+      margin: 0 0 1.5rem;
+      font-size: 0.95rem;
+      max-width: 42rem;
+    }
+
+    .layout {
+      display: grid;
+      gap: 1.25rem;
+      max-width: 1280px;
+    }
+
+    @media (min-width: 840px) {
+      .layout {
+        grid-template-columns: minmax(280px, 340px) 1fr;
+        align-items: start;
+      }
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .field { margin-bottom: 0.85rem; }
+
+    input[type="number"],
+    input[type="text"],
+    input[type="file"] {
+      width: 100%;
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.45rem 0.55rem;
+    }
+
+    input[type="file"] {
+      padding: 0.4rem;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .chaos-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .chaos-row input[type="range"] { flex: 1; }
+
+    #chaosValue {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      min-width: 2.5rem;
+    }
+
+    button#generate {
+      width: 100%;
+      margin-top: 0.35rem;
+      padding: 0.65rem 1rem;
+      font: inherit;
+      font-weight: 600;
+      color: #0f1418;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+
+    button#generate:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    button#generate:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    #info ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    #info li { padding: 0.15rem 0; }
+
+    .muted { color: var(--muted); margin: 0; }
+    .note { color: var(--note); font-size: 0.85rem; margin: 0.75rem 0 0; }
+
+    #status {
+      margin: 0.75rem 0 0;
+      font-size: 0.9rem;
+      color: var(--muted);
+      min-height: 1.3em;
+    }
+
+    #error {
+      margin: 0.75rem 0 0;
+      padding: 0.6rem 0.75rem;
+      background: rgba(229, 115, 115, 0.12);
+      border: 1px solid rgba(229, 115, 115, 0.35);
+      border-radius: var(--radius);
+      color: var(--danger);
+      font-size: 0.9rem;
+    }
+
+    #error[hidden] { display: none; }
+
+    #results {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .variant {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.85rem;
+      background: var(--bg);
+    }
+
+    .variant h3 {
+      margin: 0 0 0.25rem;
+      font-size: 1rem;
+    }
+
+    .variant .meta {
+      margin: 0 0 0.65rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .variant img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 420px;
+      object-fit: contain;
+      background: #0d0f10;
+      border-radius: 4px;
+    }
+
+    .variant .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem;
+      margin-top: 0.65rem;
+    }
+
+    .variant button {
+      font: inherit;
+      padding: 0.4rem 0.75rem;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+
+    .variant button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .variant code {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    #brushSizeValue {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      min-width: 2rem;
+    }
+
+    #clearBrush {
+      width: 100%;
+      font: inherit;
+      padding: 0.45rem 0.7rem;
+      margin-bottom: 0.5rem;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+
+    #clearBrush:hover { border-color: var(--accent); color: var(--accent); }
+
+    .stage-hint {
+      margin: 0 0 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .stage-wrap {
+      position: relative;
+      width: 100%;
+      background: #0d0f10;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .stage-wrap canvas {
+      display: block;
+    }
+
+    #overlayCanvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      touch-action: none;
+      cursor: none;
+    }
+
+    .footer-link {
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+    }
+
+    .footer-link a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>Photo Tile Shuffle</h1>
+  <p class="lede">
+    Divide a high-resolution JPEG into a grid, randomly rearrange a fraction of the tiles,
+    and export multiple full-resolution variants. All processing stays in your browser — nothing is uploaded.
+  </p>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="field">
+        <label for="file">Source JPEG</label>
+        <input id="file" type="file" accept="image/jpeg,.jpg,.jpeg" />
+      </div>
+
+      <div class="field">
+        <label for="hor">HOR (columns)</label>
+        <input id="hor" type="number" min="1" step="1" value="8" />
+      </div>
+
+      <div class="field">
+        <label for="ver">VER (rows)</label>
+        <input id="ver" type="number" min="1" step="1" value="6" />
+      </div>
+
+      <div class="field">
+        <label for="chaos">CHAOS</label>
+        <div class="chaos-row">
+          <input id="chaos" type="range" min="0" max="1" step="0.01" value="0.25" />
+          <span id="chaosValue">0.25</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="nOut">N_OUT (variants)</label>
+        <input id="nOut" type="number" min="1" step="1" value="4" />
+      </div>
+
+      <div class="field">
+        <label for="seed">SEED (optional)</label>
+        <input id="seed" type="text" placeholder="Leave empty for random" autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <label for="brushSize">Brush size</label>
+        <div class="chaos-row">
+          <input id="brushSize" type="range" min="8" max="90" step="1" value="28" />
+          <span id="brushSizeValue">28</span>
+        </div>
+      </div>
+
+      <button id="clearBrush" type="button">Clear selection</button>
+
+      <button id="generate" type="button">Generate</button>
+
+      <p id="status"></p>
+      <div id="error" hidden></div>
+    </aside>
+
+    <main>
+      <section class="panel" id="stage" hidden>
+        <p class="stage-hint">Paint with the round brush to limit shuffling to touched tiles. Leave unpainted to shuffle any tile. Clear selection to start over.</p>
+        <div class="stage-wrap" id="stageWrap">
+          <canvas id="photoCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
+      </section>
+
+      <section class="panel" id="info" aria-live="polite" style="margin-top: 1rem;">
+        <p class="muted">Select a JPEG to see grid details.</p>
+      </section>
+
+      <section id="results" aria-live="polite" style="margin-top: 1rem;"></section>
+    </main>
+  </div>
+
+  <p class="footer-link"><a href="tests.html">Run unit tests</a></p>
+
+  <script src="shuffle-core.js"></script>
+  <script src="shuffle-image.js"></script>
+  <script src="preview.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

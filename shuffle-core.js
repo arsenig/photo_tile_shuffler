@@ -1,0 +1,441 @@
+/**
+ * Photo Tile Shuffle — pure algorithm (no DOM / canvas).
+ * Attach to window for classic <script> loading (file:// compatible).
+ */
+(function (global) {
+  "use strict";
+
+  /**
+   * Mulberry32 — small seeded PRNG. Returns floats in [0, 1).
+   * @param {number} seed
+   * @returns {() => number}
+   */
+  function createRng(seed) {
+    let t = seed >>> 0;
+    return function rng() {
+      t = (t + 0x6d2b79f5) >>> 0;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /**
+   * Unseeded RNG using crypto when available.
+   * @returns {() => number}
+   */
+  function createUnseededRng() {
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      return function rng() {
+        const buf = new Uint32Array(1);
+        crypto.getRandomValues(buf);
+        return buf[0] / 4294967296;
+      };
+    }
+    return Math.random;
+  }
+
+  /**
+   * Parse optional seed string/number into a 32-bit integer, or null if empty.
+   * @param {string|number|null|undefined} seedInput
+   * @returns {number|null}
+   */
+  function parseSeed(seedInput) {
+    if (seedInput === null || seedInput === undefined) return null;
+    const s = String(seedInput).trim();
+    if (s === "") return null;
+    if (/^-?\d+$/.test(s)) {
+      return Number(s) >>> 0;
+    }
+    // Hash non-numeric strings stably
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  /**
+   * Compute cropped grid geometry. Crops excess from right/bottom only.
+   * @param {number} width
+   * @param {number} height
+   * @param {number} hor
+   * @param {number} ver
+   */
+  function calculateGrid(width, height, hor, ver) {
+    const cropWidth = width - (width % hor);
+    const cropHeight = height - (height % ver);
+    const tileWidth = cropWidth / hor;
+    const tileHeight = cropHeight / ver;
+    const tiles = hor * ver;
+    return {
+      sourceWidth: width,
+      sourceHeight: height,
+      cropWidth,
+      cropHeight,
+      cropRight: width - cropWidth,
+      cropBottom: height - cropHeight,
+      hor,
+      ver,
+      tileWidth,
+      tileHeight,
+      tiles,
+    };
+  }
+
+  /**
+   * Row-major tile index → pixel origin of that tile in the cropped image.
+   */
+  function tileOrigin(index, hor, tileWidth, tileHeight) {
+    const col = index % hor;
+    const row = Math.floor(index / hor);
+    return { x: col * tileWidth, y: row * tileHeight };
+  }
+
+  /**
+   * Number of tiles allowed to move under CHAOS, with the single-tile rule.
+   * `poolSize` is TILES when no brush is used, or the count of brush-touched tiles.
+   * Returns 0 when a derangement is impossible without exceeding CHAOS.
+   */
+  function affectedTileCount(poolSize, chaos) {
+    const n = Math.floor(poolSize * chaos);
+    if (n < 2) return 0;
+    return n;
+  }
+
+  /**
+   * True if circle (cx, cy, r) intersects axis-aligned rect [rx, ry, rw, rh].
+   */
+  function circleIntersectsRect(cx, cy, r, rx, ry, rw, rh) {
+    const closestX = Math.max(rx, Math.min(cx, rx + rw));
+    const closestY = Math.max(ry, Math.min(cy, ry + rh));
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return dx * dx + dy * dy <= r * r;
+  }
+
+  /**
+   * Tile indices whose rectangles intersect any brush stamp.
+   * Stamps are {x, y, r} in source/crop pixel space (top-left origin).
+   * Returns null when there are no stamps (caller should treat as “all tiles”).
+   * @returns {number[]|null}
+   */
+  function eligibleTilesFromStamps(grid, stamps) {
+    if (!stamps || stamps.length === 0) return null;
+    const touched = [];
+    for (let i = 0; i < grid.tiles; i++) {
+      const origin = tileOrigin(i, grid.hor, grid.tileWidth, grid.tileHeight);
+      for (let s = 0; s < stamps.length; s++) {
+        const stamp = stamps[s];
+        if (
+          circleIntersectsRect(
+            stamp.x,
+            stamp.y,
+            stamp.r,
+            origin.x,
+            origin.y,
+            grid.tileWidth,
+            grid.tileHeight
+          )
+        ) {
+          touched.push(i);
+          break;
+        }
+      }
+    }
+    return touched;
+  }
+
+  /**
+   * Normalize an optional eligible-index list against total tile count.
+   * null/undefined → all indices (no brush).
+   */
+  function resolveEligibleIndices(tiles, eligible) {
+    if (eligible == null) {
+      return Array.from({ length: tiles }, (_, i) => i);
+    }
+    const seen = new Set();
+    const out = [];
+    for (let i = 0; i < eligible.length; i++) {
+      const idx = eligible[i];
+      if (!Number.isInteger(idx) || idx < 0 || idx >= tiles) continue;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      out.push(idx);
+    }
+    return out;
+  }
+
+  /**
+   * Uniform sample of `count` unique values from `pool`.
+   * @param {number[]} pool
+   * @param {number} count
+   * @param {() => number} rng
+   * @returns {number[]}
+   */
+  function selectFromPool(pool, count, rng) {
+    if (count <= 0) return [];
+    if (count > pool.length) {
+      throw new Error("Cannot select more tiles than exist in the eligible pool.");
+    }
+    const indices = pool.slice();
+    for (let i = 0; i < count; i++) {
+      const j = i + Math.floor(rng() * (indices.length - i));
+      const tmp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = tmp;
+    }
+    return indices.slice(0, count).sort((a, b) => a - b);
+  }
+
+  /**
+   * Uniform sample of `count` unique indices from [0, total).
+   */
+  function selectAffectedTiles(total, count, rng) {
+    const pool = Array.from({ length: total }, (_, i) => i);
+    return selectFromPool(pool, count, rng);
+  }
+
+  /**
+   * Sattolo's algorithm — random cyclic permutation with no fixed points (n >= 2).
+   * Mutates `arr` in place.
+   * @param {number[]} arr
+   * @param {() => number} rng
+   */
+  function sattoloShuffle(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * i); // 0 .. i-1 inclusive
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  /**
+   * Build a dest→source map for selected positions (derangement among selected only).
+   * Unselected positions are omitted (identity implied).
+   *
+   * @param {number[]} selected sorted or unsorted unique tile indices
+   * @param {() => number} rng
+   * @returns {Map<number, number>} destinationIndex → sourceIndex
+   */
+  function createDerangementMap(selected, rng) {
+    const k = selected.length;
+    if (k === 0) return new Map();
+    if (k === 1) {
+      throw new Error("Cannot derange a single tile without exceeding CHAOS.");
+    }
+
+    const slots = Array.from({ length: k }, (_, i) => i);
+    sattoloShuffle(slots, rng);
+
+    const map = new Map();
+    for (let i = 0; i < k; i++) {
+      const dest = selected[i];
+      const source = selected[slots[i]];
+      if (dest === source) {
+        throw new Error("Internal error: derangement produced a fixed point.");
+      }
+      map.set(dest, source);
+    }
+    return map;
+  }
+
+  /**
+   * Full permutation as array: result[dest] = source tile index.
+   * Length = total tiles; identity outside the derangement map.
+   */
+  function buildSourceForDest(tiles, derangementMap) {
+    const arr = Array.from({ length: tiles }, (_, i) => i);
+    derangementMap.forEach((source, dest) => {
+      arr[dest] = source;
+    });
+    return arr;
+  }
+
+  /**
+   * One independent shuffle plan for a single output variant.
+   * @param {number} tiles
+   * @param {number} chaos
+   * @param {() => number} rng
+   * @param {number[]|null|undefined} eligible  null/undefined = all tiles
+   * @returns {{
+   *   affectedCount: number,
+   *   selected: number[],
+   *   sourceForDest: number[],
+   *   moved: boolean,
+   *   eligibleCount: number,
+   *   reason?: string
+   * }}
+   */
+  function planShuffle(tiles, chaos, rng, eligible) {
+    const identity = () => Array.from({ length: tiles }, (_, i) => i);
+
+    if (tiles < 2) {
+      return {
+        affectedCount: 0,
+        selected: [],
+        sourceForDest: identity(),
+        moved: false,
+        eligibleCount: tiles,
+        reason: "Only one tile exists; no rearrangement is possible.",
+      };
+    }
+
+    const pool = resolveEligibleIndices(tiles, eligible);
+    const eligibleCount = pool.length;
+
+    if (eligibleCount === 0) {
+      return {
+        affectedCount: 0,
+        selected: [],
+        sourceForDest: identity(),
+        moved: false,
+        eligibleCount: 0,
+        reason: "No tiles were touched by the brush; producing an unchanged result.",
+      };
+    }
+
+    const raw = Math.floor(eligibleCount * chaos);
+    const affectedCount = affectedTileCount(eligibleCount, chaos);
+
+    if (affectedCount === 0) {
+      const reason =
+        raw === 1
+          ? "Fewer than two tiles can be moved without exceeding the requested CHAOS value (one tile alone cannot move)."
+          : "CHAOS selects fewer than two tiles; producing an unchanged result.";
+      return {
+        affectedCount: 0,
+        selected: [],
+        sourceForDest: identity(),
+        moved: false,
+        eligibleCount,
+        reason,
+      };
+    }
+
+    const selected = selectFromPool(pool, affectedCount, rng);
+    const map = createDerangementMap(selected, rng);
+    return {
+      affectedCount,
+      selected,
+      sourceForDest: buildSourceForDest(tiles, map),
+      moved: true,
+      eligibleCount,
+    };
+  }
+
+  /**
+   * Validate UI / CLI parameters against image dimensions.
+   * @returns {{ ok: true } | { ok: false, error: string }}
+   */
+  function validateParams(opts) {
+    const { isJpeg, width, height, hor, ver, chaos, nOut } = opts;
+
+    if (!isJpeg) {
+      return { ok: false, error: "Input must be a JPEG image (.jpg / .jpeg)." };
+    }
+    if (!Number.isInteger(hor) || hor < 1) {
+      return { ok: false, error: "HOR must be an integer >= 1." };
+    }
+    if (!Number.isInteger(ver) || ver < 1) {
+      return { ok: false, error: "VER must be an integer >= 1." };
+    }
+    if (width != null && hor > width) {
+      return { ok: false, error: "HOR cannot exceed image width in pixels." };
+    }
+    if (height != null && ver > height) {
+      return { ok: false, error: "VER cannot exceed image height in pixels." };
+    }
+    if (typeof chaos !== "number" || Number.isNaN(chaos) || chaos < 0 || chaos > 1) {
+      return { ok: false, error: "CHAOS must be a number between 0 and 1 (inclusive)." };
+    }
+    if (!Number.isInteger(nOut) || nOut < 1) {
+      return { ok: false, error: "N_OUT must be an integer >= 1." };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Format CHAOS for filenames (e.g. 0.25, 1, 0.1).
+   */
+  function formatChaosForFilename(chaos) {
+    const s = String(Number(chaos));
+    return s;
+  }
+
+  /**
+   * @param {string} originalName e.g. "portrait.jpg"
+   * @param {number} hor
+   * @param {number} ver
+   * @param {number} chaos
+   * @param {number} variantIndex 1-based
+   */
+  function generateFilename(originalName, hor, ver, chaos, variantIndex) {
+    const base = originalName.replace(/\.[^.\\/]+$/, "") || "image";
+    const nnn = String(variantIndex).padStart(3, "0");
+    const c = formatChaosForFilename(chaos);
+    return `${base}_shuffle_${hor}x${ver}_c${c}_${nnn}.jpg`;
+  }
+
+  /**
+   * Assert helpers used by tests (and optional debug).
+   */
+  function assertPermutationValid(selected, sourceForDest) {
+    const selectedSet = new Set(selected);
+    const sources = [];
+    const dests = [];
+    for (const dest of selected) {
+      const source = sourceForDest[dest];
+      if (!selectedSet.has(source)) {
+        throw new Error("Source index not in selected set.");
+      }
+      if (source === dest) {
+        throw new Error("Fixed point in derangement.");
+      }
+      sources.push(source);
+      dests.push(dest);
+    }
+    if (new Set(sources).size !== selected.length) {
+      throw new Error("Duplicate source in permutation.");
+    }
+    // Outside selection must be identity
+    for (let i = 0; i < sourceForDest.length; i++) {
+      if (!selectedSet.has(i) && sourceForDest[i] !== i) {
+        throw new Error("Unselected tile was moved.");
+      }
+    }
+    return true;
+  }
+
+  const api = {
+    createRng,
+    createUnseededRng,
+    parseSeed,
+    calculateGrid,
+    tileOrigin,
+    affectedTileCount,
+    circleIntersectsRect,
+    eligibleTilesFromStamps,
+    resolveEligibleIndices,
+    selectFromPool,
+    selectAffectedTiles,
+    sattoloShuffle,
+    createDerangementMap,
+    buildSourceForDest,
+    planShuffle,
+    validateParams,
+    generateFilename,
+    formatChaosForFilename,
+    assertPermutationValid,
+  };
+
+  global.PhotoShuffleCore = api;
+
+  // Node / CommonJS for headless unit tests
+  if (typeof module === "object" && module.exports) {
+    module.exports = api;
+  }
+})(typeof window !== "undefined" ? window : globalThis);
