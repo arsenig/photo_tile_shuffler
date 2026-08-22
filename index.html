@@ -268,6 +268,9 @@
       cursor: none;
     }
 
+    /* Focused on draw so brush shortcuts apply; never reached by Tab. */
+    #overlayCanvas:focus { outline: none; }
+
     .footer-link {
       margin-top: 1.5rem;
       font-size: 0.85rem;
@@ -321,7 +324,7 @@
       <div class="field">
         <label for="brushSize">Brush size ([ / ])</label>
         <div class="chaos-row">
-          <input id="brushSize" type="range" min="8" max="90" step="1" value="28" />
+          <input id="brushSize" type="range" min="1" max="90" step="1" value="28" />
           <span id="brushSizeValue" class="range-value">28</span>
         </div>
       </div>
@@ -336,10 +339,10 @@
 
     <main>
       <section class="panel" id="stage" hidden>
-        <p class="stage-hint">Left-drag paints tiles; right-drag erases (Command-click on Mac). Touched tiles highlight in full. [ and ] change brush size. Leave unpainted to shuffle any tile.</p>
+        <p class="stage-hint">Left-drag paints tiles; right-drag erases (Command-click on Mac). Touched tiles highlight in full. [ and ] change brush size; Ctrl+Z undoes the last drag. Leave unpainted to shuffle any tile.</p>
         <div class="stage-wrap" id="stageWrap">
           <canvas id="photoCanvas"></canvas>
-          <canvas id="overlayCanvas"></canvas>
+          <canvas id="overlayCanvas" tabindex="-1"></canvas>
         </div>
       </section>
 

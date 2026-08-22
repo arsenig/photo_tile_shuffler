@@ -6,7 +6,12 @@
   "use strict";
 
   const Core = global.PhotoShuffleCore;
-  const BRUSH_NUDGE = 4;
+  const BRUSH_MIN = 1;
+  const BRUSH_MAX = 90;
+  // Fine steps near the bottom of the range keep single-tile picking practical.
+  const BRUSH_FINE_BELOW = 10;
+  const BRUSH_FINE_STEP = 1;
+  const BRUSH_COARSE_STEP = 4;
 
   /**
    * @param {object} opts
@@ -73,6 +78,20 @@
         x: ((clientX - rect.left) / rect.width) * imageWidth,
         y: ((clientY - rect.top) / rect.height) * imageHeight,
       };
+    }
+
+    /**
+     * Pull focus out of HOR/VER/SEED so brush shortcuts stop being treated as typing.
+     * preventDefault() on pointerdown otherwise leaves focus wherever it was.
+     */
+    function takeFocus() {
+      try {
+        overlay.focus({ preventScroll: true });
+      } catch (_) {
+        overlay.focus();
+      }
+      const active = document.activeElement;
+      if (active && active !== overlay && isTypingTarget(active)) active.blur();
     }
 
     function isEraseEvent(ev) {
@@ -270,6 +289,7 @@
       if (!image) return;
       if (ev.button !== 0 && ev.button !== 2) return;
       ev.preventDefault();
+      takeFocus();
       overlay.setPointerCapture(ev.pointerId);
       painting = true;
       const erase = isEraseEvent(ev);
@@ -365,8 +385,8 @@
     function applyBrushSize(next) {
       const min = Number(brushSizeEl.min);
       const max = Number(brushSizeEl.max);
-      const lo = Number.isFinite(min) ? min : 8;
-      const hi = Number.isFinite(max) ? max : 90;
+      const lo = Number.isFinite(min) ? min : BRUSH_MIN;
+      const hi = Number.isFinite(max) ? max : BRUSH_MAX;
       const value = Math.min(hi, Math.max(lo, next));
       brushSizeEl.value = String(value);
       updateBrushLabel();
@@ -380,7 +400,20 @@
     }
 
     function nudgeBrush(direction) {
-      applyBrushSize(brushCssRadius() + direction * BRUSH_NUDGE);
+      const value = brushCssRadius();
+      const fine =
+        direction < 0 ? value <= BRUSH_FINE_BELOW : value < BRUSH_FINE_BELOW;
+      const step = fine ? BRUSH_FINE_STEP : BRUSH_COARSE_STEP;
+      applyBrushSize(value + direction * step);
+    }
+
+    /** Undo affects brush strokes only; Clear selection is not undoable. */
+    function undoStroke() {
+      if (painting || !strokes.length) return;
+      strokes.pop();
+      rebuildSelection();
+      drawOverlay();
+      onChange();
     }
 
     function isTypingTarget(el) {
@@ -395,8 +428,18 @@
     }
 
     function onKeyDown(ev) {
-      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
       if (isTypingTarget(ev.target)) return;
+
+      // Ctrl+Z / Cmd+Z. Shift is reserved for a redo that does not exist yet.
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey) {
+        if (ev.code === "KeyZ" || ev.key === "z" || ev.key === "Z") {
+          ev.preventDefault();
+          undoStroke();
+        }
+        return;
+      }
+
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
       // Physical keys (US [ / ]); Russian layout types х / ъ on the same positions.
       if (ev.code === "BracketLeft" || ev.key === "[") {
         ev.preventDefault();

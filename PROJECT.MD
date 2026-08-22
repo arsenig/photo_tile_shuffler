@@ -174,8 +174,10 @@ After a JPEG is loaded, show the input photo on screen with:
 - Grid lines for the current HOR×VER (on the cropped region).
 - A **round, resizable** brush. Left-drag paints tiles that may be shuffled; right-drag (Command-click drag on Mac) erases them.
 - Touched tiles shown as a **full-tile** semi-transparent checkerboard (not a freehand trail).
-- `[` / `]` shrink / grow the brush (physical keys, so Russian `х` / `ъ` work too). Ignored while a text or number field is focused.
-- **Clear selection** to discard the brush mask and start over (then all tiles are eligible again).
+- `[` / `]` shrink / grow the brush (physical keys, so Russian `х` / `ъ` work too). Radius ranges from **1** to 90 CSS px; steps are 1 below 10 and 4 above.
+- `Ctrl+Z` / `Cmd+Z` undoes the **last drag** (paint or erase) as a whole, restoring the tile selection to its state before that drag. Repeating walks further back. There is no redo.
+- Keyboard shortcuts are ignored while a text or number field is focused, so `Ctrl+Z` in SEED stays native text undo. Starting a drag on the preview takes focus off such a field, so shortcuts work right after painting without a separate click.
+- **Clear selection** to discard the brush mask and start over (then all tiles are eligible again). This also discards undo history and cannot itself be undone.
 
 The preview may be CSS/canvas-scaled for display. Brush stamps and tile eligibility stay in full image pixel space.
 
@@ -234,5 +236,6 @@ Core tests live in `core-tests.js` (see `tests.html` / `run-tests.js`) and cover
 - No drag-and-drop or progress cancel yet.
 - No ZIP download of all variants.
 - Brush erase uses right-click or Mac Command-click; there is no separate eraser tool.
+- Undo is stroke-granular and one-directional: no redo (`Ctrl+Y`), and **Clear selection** is not undoable.
 
 When changing behavior, update this file and extend `tests.html` / `run-tests.js` accordingly.
