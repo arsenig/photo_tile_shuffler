@@ -102,11 +102,12 @@
 
     .chaos-row input[type="range"] { flex: 1; }
 
-    #chaosValue {
+    .range-value {
       font-family: var(--mono);
       font-size: 0.9rem;
-      min-width: 2.5rem;
     }
+
+    #chaosValue { min-width: 2.5rem; }
 
     button#generate {
       width: 100%;
@@ -225,11 +226,7 @@
       word-break: break-all;
     }
 
-    #brushSizeValue {
-      font-family: var(--mono);
-      font-size: 0.9rem;
-      min-width: 2rem;
-    }
+    #brushSizeValue { min-width: 2rem; }
 
     #clearBrush {
       width: 100%;
@@ -307,7 +304,7 @@
         <label for="chaos">CHAOS</label>
         <div class="chaos-row">
           <input id="chaos" type="range" min="0" max="1" step="0.01" value="0.25" />
-          <span id="chaosValue">0.25</span>
+          <span id="chaosValue" class="range-value">0.25</span>
         </div>
       </div>
 
@@ -325,7 +322,7 @@
         <label for="brushSize">Brush size</label>
         <div class="chaos-row">
           <input id="brushSize" type="range" min="8" max="90" step="1" value="28" />
-          <span id="brushSizeValue">28</span>
+          <span id="brushSizeValue" class="range-value">28</span>
         </div>
       </div>
 

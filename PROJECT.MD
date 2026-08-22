@@ -51,8 +51,9 @@ Out of scope: platform-native apps, servers, frameworks, bundlers.
 | `shuffle-core.js` | Pure algorithm: grid, CHAOS math, brush-eligible tiles, selection, derangement, seed/RNG, filenames, validation |
 | `shuffle-image.js` | Browser image I/O: load, render tiles to canvas, JPEG encode, sequential multi-variant generation |
 | `preview.js` | Input photo preview, grid overlay, round brush painting, checkerboard mask display |
-| `tests.html` | In-browser unit tests for core |
-| `run-tests.js` | Same core tests via Node (`node run-tests.js`) |
+| `core-tests.js` | Shared PhotoShuffleCore assertions (browser + Node) |
+| `tests.html` | In-browser runner for `core-tests.js` |
+| `run-tests.js` | Node runner (`node run-tests.js`) |
 | `PROJECT.MD` | This document |
 
 Keep algorithm logic out of `app.js`. Core must remain unit-testable without DOM/canvas.
@@ -185,7 +186,7 @@ Validation errors surface clearly (non-JPEG, bad HOR/VER/CHAOS/N_OUT, HOR/VER vs
 
 ## Testing expectations
 
-Core tests (see `tests.html` / `run-tests.js`) cover at least:
+Core tests live in `core-tests.js` (see `tests.html` / `run-tests.js`) and cover at least:
 
 - Grid tile count (e.g. 5×4 → 20).
 - Minimal right/bottom crop.

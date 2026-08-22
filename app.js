@@ -64,7 +64,6 @@
   });
 
   function currentEligible(grid) {
-    if (!preview.hasPaint()) return null;
     return Core.eligibleTilesFromStamps(grid, preview.getStamps());
   }
 
@@ -108,25 +107,31 @@
     const affected = chaosOk ? Core.affectedTileCount(poolSize, chaos) : 0;
     const rawAffected = chaosOk ? Math.floor(poolSize * chaos) : 0;
 
+    function noteHtml(text) {
+      return '<p class="note">' + text + "</p>";
+    }
+
     let note = "";
     if (grid.tiles === 1) {
-      note = "<p class=\"note\">Only one tile — no rearrangement possible.</p>";
+      note = noteHtml("Only one tile — no rearrangement possible.");
     } else if (eligible != null && eligible.length === 0) {
-      note =
-        "<p class=\"note\">Brush paint did not touch any tiles (it may be on the cropped strip). Outputs will be unchanged.</p>";
+      note = noteHtml(
+        "Brush paint did not touch any tiles (it may be on the cropped strip). Outputs will be unchanged."
+      );
     } else if (chaosOk && rawAffected === 1) {
-      note =
-        "<p class=\"note\">Calculated affected tiles = 1 → will move 0 (cannot move a single tile without exceeding CHAOS).</p>";
+      note = noteHtml(
+        "Calculated affected tiles = 1 → will move 0 (cannot move a single tile without exceeding CHAOS)."
+      );
     } else if (chaosOk && affected === 0 && chaos > 0) {
-      note =
-        "<p class=\"note\">Fewer than two tiles selected by CHAOS → unchanged outputs.</p>";
+      note = noteHtml("Fewer than two tiles selected by CHAOS → unchanged outputs.");
     } else if (eligible != null && chaosOk && affected < eligible.length) {
-      note =
-        "<p class=\"note\">Brush is active: only painted tiles can move; CHAOS will move " +
-        affected +
-        " of " +
-        eligible.length +
-        " touched tiles.</p>";
+      note = noteHtml(
+        "Brush is active: only painted tiles can move; CHAOS will move " +
+          affected +
+          " of " +
+          eligible.length +
+          " touched tiles."
+      );
     }
 
     const cropNote =
@@ -254,24 +259,14 @@
     }
 
     const params = readParams();
-    const hor = params.hor;
-    const ver = params.ver;
-    const chaos = params.chaos;
-    const nOut = params.nOut;
-
-    // Coerce integers from number inputs (may be floats if user typed oddly)
-    const horInt = Math.trunc(hor);
-    const verInt = Math.trunc(ver);
-    const nOutInt = Math.trunc(nOut);
-
     const validation = Core.validateParams({
       isJpeg: Img.isJpegFile(currentFile),
       width: imageDims.width,
       height: imageDims.height,
-      hor: horInt,
-      ver: verInt,
-      chaos,
-      nOut: nOutInt,
+      hor: params.hor,
+      ver: params.ver,
+      chaos: params.chaos,
+      nOut: params.nOut,
     });
 
     if (!validation.ok) {
@@ -279,17 +274,8 @@
       return;
     }
 
-    if (hor !== horInt || ver !== verInt || nOut !== nOutInt) {
-      setError("HOR, VER, and N_OUT must be whole numbers.");
-      return;
-    }
-
-    const grid = Core.calculateGrid(
-      imageDims.width,
-      imageDims.height,
-      horInt,
-      verInt
-    );
+    const { hor, ver, chaos, nOut } = params;
+    const grid = Core.calculateGrid(imageDims.width, imageDims.height, hor, ver);
 
     if (grid.tileWidth < 1 || grid.tileHeight < 1) {
       setError("Grid produces zero-size tiles; reduce HOR/VER or use a larger image.");
@@ -301,7 +287,7 @@
       seed === null ? Core.createUnseededRng() : Core.createRng(seed);
 
     els.generate.disabled = true;
-    setStatus(`Generating ${nOutInt} variant(s)…`);
+    setStatus(`Generating ${nOut} variant(s)…`);
 
     let unchangedNoteShown = false;
     let unchangedReason = "";
@@ -311,7 +297,7 @@
         sourceImage: loadedImage,
         grid,
         chaos,
-        nOut: nOutInt,
+        nOut,
         rng,
         eligible: currentEligible(grid),
         onProgress({ current, total }) {
@@ -321,8 +307,8 @@
           objectUrls.push(objectUrl);
           const filename = Core.generateFilename(
             currentFile.name,
-            horInt,
-            verInt,
+            hor,
+            ver,
             chaos,
             index
           );
@@ -335,7 +321,7 @@
         },
       });
 
-      let doneMsg = `Done — ${nOutInt} variant(s) ready. Save each as needed.`;
+      let doneMsg = `Done — ${nOut} variant(s) ready. Save each as needed.`;
       if (unchangedReason) doneMsg += " " + unchangedReason;
       setStatus(doneMsg);
     } catch (e) {

@@ -5,6 +5,16 @@
 (function (global) {
   "use strict";
 
+  function range(n) {
+    return Array.from({ length: n }, (_, i) => i);
+  }
+
+  function swap(arr, i, j) {
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+
   /**
    * Mulberry32 — small seeded PRNG. Returns floats in [0, 1).
    * @param {number} seed
@@ -153,7 +163,7 @@
    */
   function resolveEligibleIndices(tiles, eligible) {
     if (eligible == null) {
-      return Array.from({ length: tiles }, (_, i) => i);
+      return range(tiles);
     }
     const seen = new Set();
     const out = [];
@@ -182,19 +192,9 @@
     const indices = pool.slice();
     for (let i = 0; i < count; i++) {
       const j = i + Math.floor(rng() * (indices.length - i));
-      const tmp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = tmp;
+      swap(indices, i, j);
     }
     return indices.slice(0, count).sort((a, b) => a - b);
-  }
-
-  /**
-   * Uniform sample of `count` unique indices from [0, total).
-   */
-  function selectAffectedTiles(total, count, rng) {
-    const pool = Array.from({ length: total }, (_, i) => i);
-    return selectFromPool(pool, count, rng);
   }
 
   /**
@@ -205,10 +205,7 @@
    */
   function sattoloShuffle(arr, rng) {
     for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * i); // 0 .. i-1 inclusive
-      const tmp = arr[i];
-      arr[i] = arr[j];
-      arr[j] = tmp;
+      swap(arr, i, Math.floor(rng() * i)); // 0 .. i-1 inclusive
     }
     return arr;
   }
@@ -228,7 +225,7 @@
       throw new Error("Cannot derange a single tile without exceeding CHAOS.");
     }
 
-    const slots = Array.from({ length: k }, (_, i) => i);
+    const slots = range(k);
     sattoloShuffle(slots, rng);
 
     const map = new Map();
@@ -248,7 +245,7 @@
    * Length = total tiles; identity outside the derangement map.
    */
   function buildSourceForDest(tiles, derangementMap) {
-    const arr = Array.from({ length: tiles }, (_, i) => i);
+    const arr = range(tiles);
     derangementMap.forEach((source, dest) => {
       arr[dest] = source;
     });
@@ -271,31 +268,29 @@
    * }}
    */
   function planShuffle(tiles, chaos, rng, eligible) {
-    const identity = () => Array.from({ length: tiles }, (_, i) => i);
-
-    if (tiles < 2) {
+    function unchanged(eligibleCount, reason) {
       return {
         affectedCount: 0,
         selected: [],
-        sourceForDest: identity(),
+        sourceForDest: range(tiles),
         moved: false,
-        eligibleCount: tiles,
-        reason: "Only one tile exists; no rearrangement is possible.",
+        eligibleCount,
+        reason,
       };
+    }
+
+    if (tiles < 2) {
+      return unchanged(tiles, "Only one tile exists; no rearrangement is possible.");
     }
 
     const pool = resolveEligibleIndices(tiles, eligible);
     const eligibleCount = pool.length;
 
     if (eligibleCount === 0) {
-      return {
-        affectedCount: 0,
-        selected: [],
-        sourceForDest: identity(),
-        moved: false,
-        eligibleCount: 0,
-        reason: "No tiles were touched by the brush; producing an unchanged result.",
-      };
+      return unchanged(
+        0,
+        "No tiles were touched by the brush; producing an unchanged result."
+      );
     }
 
     const raw = Math.floor(eligibleCount * chaos);
@@ -306,14 +301,7 @@
         raw === 1
           ? "Fewer than two tiles can be moved without exceeding the requested CHAOS value (one tile alone cannot move)."
           : "CHAOS selects fewer than two tiles; producing an unchanged result.";
-      return {
-        affectedCount: 0,
-        selected: [],
-        sourceForDest: identity(),
-        moved: false,
-        eligibleCount,
-        reason,
-      };
+      return unchanged(eligibleCount, reason);
     }
 
     const selected = selectFromPool(pool, affectedCount, rng);
@@ -421,7 +409,6 @@
     eligibleTilesFromStamps,
     resolveEligibleIndices,
     selectFromPool,
-    selectAffectedTiles,
     sattoloShuffle,
     createDerangementMap,
     buildSourceForDest,

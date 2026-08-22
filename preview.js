@@ -203,8 +203,7 @@
       ctx.clearRect(0, 0, w, h);
       if (!imageWidth || !imageHeight) return;
 
-      const sx = w / imageWidth;
-      const sy = h / imageHeight;
+      const { sx, sy } = scale();
 
       if (hasPaint() && mask.width && mask.height) {
         ctx.save();
