@@ -158,6 +158,36 @@
 
       const edge = C.eligibleTilesFromStamps(g, [{ x: 100, y: 100, r: 5 }]);
       assert("Stamp on tile corner can touch 4 tiles", edge.length >= 2 && edge.length <= 4);
+
+      const paint = { r: 20, points: [{ x: 50, y: 50 }], erase: false };
+      const erase = { r: 20, points: [{ x: 50, y: 50 }], erase: true };
+      assert(
+        "Paint stroke selects first tile",
+        JSON.stringify(C.eligibleTilesFromStrokes(g, [paint])) === "[0]"
+      );
+      assert(
+        "Paint then erase → no mask",
+        C.eligibleTilesFromStrokes(g, [paint, erase]) === null
+      );
+      assert(
+        "Paint, erase, paint → selected again",
+        JSON.stringify(C.eligibleTilesFromStrokes(g, [paint, erase, paint])) === "[0]"
+      );
+      assert("Erase only → no mask", C.eligibleTilesFromStrokes(g, [erase]) === null);
+
+      const cropped = C.calculateGrid(1001, 800, 10, 8);
+      const miss = { r: 0.2, points: [{ x: 1000.9, y: 50 }], erase: false };
+      const missed = C.eligibleTilesFromStrokes(cropped, [miss]);
+      assert("Paint on crop strip → empty eligible", missed && missed.length === 0);
+
+      const sampled = C.stampsFromStroke({
+        r: 10,
+        points: [
+          { x: 0, y: 0 },
+          { x: 40, y: 0 },
+        ],
+      });
+      assert("stampsFromStroke samples along a segment", sampled.length >= 3);
     }
 
     {

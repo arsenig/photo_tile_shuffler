@@ -158,6 +158,75 @@
   }
 
   /**
+   * Sample circle stamps along a stroke polyline so fast flicks still mark tiles.
+   * @param {{ r: number, points: { x: number, y: number }[] }} stroke
+   * @returns {{ x: number, y: number, r: number }[]}
+   */
+  function stampsFromStroke(stroke) {
+    const stamps = [];
+    const pts = stroke && stroke.points;
+    const r = stroke && stroke.r;
+    if (!pts || !pts.length || !(r > 0)) return stamps;
+    stamps.push({ x: pts[0].x, y: pts[0].y, r: r });
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const step = Math.max(2, r * 0.7);
+      const n = Math.max(1, Math.ceil(dist / step));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        stamps.push({
+          x: a.x + (b.x - a.x) * t,
+          y: a.y + (b.y - a.y) * t,
+          r: r,
+        });
+      }
+    }
+    return stamps;
+  }
+
+  /**
+   * Apply paint/erase strokes in order and return the eligible tile index list.
+   * null → no mask (all tiles). [] → mask active but no tiles (e.g. crop-strip paint).
+   * Fully erasing a previous selection returns null.
+   * @param {object} grid
+   * @param {{ r: number, points: { x: number, y: number }[], erase?: boolean }[]} strokes
+   * @returns {number[]|null}
+   */
+  function eligibleTilesFromStrokes(grid, strokes) {
+    if (!grid || !strokes || !strokes.length) return null;
+
+    const selected = new Set();
+    let paintHit = false;
+    let paintMiss = false;
+
+    for (let s = 0; s < strokes.length; s++) {
+      const stroke = strokes[s];
+      const stamps = stampsFromStroke(stroke);
+      if (!stamps.length) continue;
+      const hits = eligibleTilesFromStamps(grid, stamps) || [];
+      if (stroke.erase) {
+        for (let i = 0; i < hits.length; i++) selected.delete(hits[i]);
+      } else if (hits.length) {
+        paintHit = true;
+        for (let i = 0; i < hits.length; i++) selected.add(hits[i]);
+      } else {
+        paintMiss = true;
+      }
+    }
+
+    if (selected.size) {
+      return Array.from(selected).sort(function (a, b) {
+        return a - b;
+      });
+    }
+    if (paintHit) return null;
+    if (paintMiss) return [];
+    return null;
+  }
+
+  /**
    * Normalize an optional eligible-index list against total tile count.
    * null/undefined → all indices (no brush).
    */
@@ -407,6 +476,8 @@
     affectedTileCount,
     circleIntersectsRect,
     eligibleTilesFromStamps,
+    stampsFromStroke,
+    eligibleTilesFromStrokes,
     resolveEligibleIndices,
     selectFromPool,
     sattoloShuffle,

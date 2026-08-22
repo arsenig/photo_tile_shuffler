@@ -319,7 +319,7 @@
       </div>
 
       <div class="field">
-        <label for="brushSize">Brush size</label>
+        <label for="brushSize">Brush size ([ / ])</label>
         <div class="chaos-row">
           <input id="brushSize" type="range" min="8" max="90" step="1" value="28" />
           <span id="brushSizeValue" class="range-value">28</span>
@@ -336,7 +336,7 @@
 
     <main>
       <section class="panel" id="stage" hidden>
-        <p class="stage-hint">Paint with the round brush to limit shuffling to touched tiles. Leave unpainted to shuffle any tile. Clear selection to start over.</p>
+        <p class="stage-hint">Left-drag paints tiles; right-drag erases (Command-click on Mac). Touched tiles highlight in full. [ and ] change brush size. Leave unpainted to shuffle any tile.</p>
         <div class="stage-wrap" id="stageWrap">
           <canvas id="photoCanvas"></canvas>
           <canvas id="overlayCanvas"></canvas>

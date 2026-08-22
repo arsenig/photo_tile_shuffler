@@ -64,7 +64,7 @@
   });
 
   function currentEligible(grid) {
-    return Core.eligibleTilesFromStamps(grid, preview.getStamps());
+    return Core.eligibleTilesFromStrokes(grid, preview.getStrokes());
   }
 
   function readParams() {

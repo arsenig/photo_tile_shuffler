@@ -1,9 +1,12 @@
 /**
  * Photo Tile Shuffle — input preview, grid overlay, round brush mask.
- * Each pointer stroke is independent; strokes are not connected to each other.
+ * Paint/erase select whole tiles; the overlay fills those tiles, not the freehand path.
  */
 (function (global) {
   "use strict";
+
+  const Core = global.PhotoShuffleCore;
+  const BRUSH_NUDGE = 4;
 
   /**
    * @param {object} opts
@@ -33,15 +36,19 @@
     /** @type {object|null} */
     let grid = null;
 
-    /** @type {{ r: number, points: { x: number, y: number }[] }[]} */
+    /** @type {{ r: number, erase: boolean, points: { x: number, y: number }[] }[]} */
     let strokes = [];
-    /** @type {{ r: number, points: { x: number, y: number }[] }|null} */
+    /** @type {{ r: number, erase: boolean, points: { x: number, y: number }[] }|null} */
     let currentStroke = null;
     let painting = false;
     let hover = null;
+    let hoverErase = false;
 
-    const mask = document.createElement("canvas");
-    const maskCtx = mask.getContext("2d");
+    /** @type {Set<number>} */
+    let selected = new Set();
+    /** True when paint strokes exist but none ever hit a tile (crop strip only). */
+    let cropOnlyPaint = false;
+
     let checkerPattern = null;
     let checkerKey = "";
 
@@ -68,17 +75,16 @@
       };
     }
 
-    function hasPaint() {
-      for (let i = 0; i < strokes.length; i++) {
-        if (strokes[i].points.length) return true;
-      }
+    function isEraseEvent(ev) {
+      if (ev.button === 2) return true;
+      if (ev.button === 0 && ev.metaKey) return true;
       return false;
     }
 
     function scale() {
       return {
-        sx: mask.width / imageWidth,
-        sy: mask.height / imageHeight,
+        sx: overlay.width / imageWidth,
+        sy: overlay.height / imageHeight,
       };
     }
 
@@ -102,49 +108,30 @@
       return checkerPattern;
     }
 
-    function configureMaskBrush(r) {
-      const { sx } = scale();
-      maskCtx.fillStyle = "#fff";
-      maskCtx.strokeStyle = "#fff";
-      maskCtx.lineCap = "round";
-      maskCtx.lineJoin = "round";
-      maskCtx.lineWidth = Math.max(1, 2 * r * sx);
-    }
-
-    function stampMaskDot(point, r) {
-      const { sx, sy } = scale();
-      configureMaskBrush(r);
-      maskCtx.beginPath();
-      maskCtx.arc(point.x * sx, point.y * sy, r * sx, 0, Math.PI * 2);
-      maskCtx.fill();
-    }
-
-    function stampMaskSegment(from, to, r) {
-      const { sx, sy } = scale();
-      configureMaskBrush(r);
-      maskCtx.beginPath();
-      maskCtx.moveTo(from.x * sx, from.y * sy);
-      maskCtx.lineTo(to.x * sx, to.y * sy);
-      maskCtx.stroke();
-    }
-
-    function rebuildMask() {
-      maskCtx.setTransform(1, 0, 0, 1, 0, 0);
-      maskCtx.clearRect(0, 0, mask.width, mask.height);
-      if (!imageWidth || !imageHeight) return;
-      for (let s = 0; s < strokes.length; s++) {
-        const stroke = strokes[s];
-        const pts = stroke.points;
-        if (!pts.length) continue;
-        if (pts.length === 1) {
-          stampMaskDot(pts[0], stroke.r);
-        } else {
-          stampMaskDot(pts[0], stroke.r);
-          for (let i = 1; i < pts.length; i++) {
-            stampMaskSegment(pts[i - 1], pts[i], stroke.r);
-          }
-        }
+    function rebuildSelection() {
+      selected = new Set();
+      cropOnlyPaint = false;
+      if (!grid || !Core) return;
+      const eligible = Core.eligibleTilesFromStrokes(grid, strokes);
+      if (eligible == null) return;
+      if (eligible.length === 0) {
+        cropOnlyPaint = true;
+        return;
       }
+      for (let i = 0; i < eligible.length; i++) selected.add(eligible[i]);
+    }
+
+    function getEligibleTiles() {
+      if (!grid || !Core) return null;
+      return Core.eligibleTilesFromStrokes(grid, strokes);
+    }
+
+    function getStrokes() {
+      return strokes;
+    }
+
+    function hasPaint() {
+      return selected.size > 0 || cropOnlyPaint;
     }
 
     function resizeCanvases() {
@@ -167,19 +154,16 @@
       const dpr = window.devicePixelRatio || 1;
       const pw = Math.max(1, Math.round(cssW * dpr));
       const ph = Math.max(1, Math.round(cssH * dpr));
-      [photoCanvas, overlay, mask].forEach((c) => {
+      [photoCanvas, overlay].forEach((c) => {
         if (c.width !== pw || c.height !== ph) {
           c.width = pw;
           c.height = ph;
         }
-        if (c !== mask) {
-          c.style.width = cssW + "px";
-          c.style.height = cssH + "px";
-        }
+        c.style.width = cssW + "px";
+        c.style.height = cssH + "px";
       });
       wrap.style.height = cssH + "px";
       checkerPattern = null;
-      rebuildMask();
       drawPhoto();
       drawOverlay();
     }
@@ -205,12 +189,18 @@
 
       const { sx, sy } = scale();
 
-      if (hasPaint() && mask.width && mask.height) {
+      if (grid && selected.size > 0) {
         ctx.save();
         ctx.fillStyle = getChecker(ctx) || "rgba(250,250,250,0.45)";
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = "destination-in";
-        ctx.drawImage(mask, 0, 0);
+        selected.forEach(function (index) {
+          const origin = Core.tileOrigin(index, grid.hor, grid.tileWidth, grid.tileHeight);
+          ctx.fillRect(
+            origin.x * sx,
+            origin.y * sy,
+            grid.tileWidth * sx,
+            grid.tileHeight * sy
+          );
+        });
         ctx.restore();
       }
 
@@ -242,8 +232,9 @@
       }
 
       if (hover) {
+        const erasing = hoverErase || (currentStroke && currentStroke.erase);
         ctx.beginPath();
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.strokeStyle = erasing ? "rgba(229, 115, 115, 0.95)" : "rgba(255, 255, 255, 0.9)";
         ctx.lineWidth = Math.max(1.5, window.devicePixelRatio || 1);
         ctx.ellipse(
           hover.x * sx,
@@ -266,23 +257,26 @@
       if (prev) {
         const minDist = Math.max(1, r * 0.15);
         if (Math.hypot(pos.x - prev.x, pos.y - prev.y) < minDist) return;
-        pts.push(pos);
-        stampMaskSegment(prev, pos, r);
-      } else {
-        pts.push(pos);
-        stampMaskDot(pos, r);
       }
+      pts.push(pos);
+      const before = selected.size;
+      const beforeCrop = cropOnlyPaint;
+      rebuildSelection();
       drawOverlay();
+      if (selected.size !== before || cropOnlyPaint !== beforeCrop) onChange();
     }
 
     function onPointerDown(ev) {
-      if (!image || ev.button !== 0) return;
+      if (!image) return;
+      if (ev.button !== 0 && ev.button !== 2) return;
       ev.preventDefault();
       overlay.setPointerCapture(ev.pointerId);
       painting = true;
+      const erase = isEraseEvent(ev);
+      hoverErase = erase;
       const pos = clientToImage(ev.clientX, ev.clientY);
       if (!pos) return;
-      currentStroke = { r: imageRadiusFromCss(), points: [] };
+      currentStroke = { r: imageRadiusFromCss(), erase: erase, points: [] };
       strokes.push(currentStroke);
       hover = { x: pos.x, y: pos.y, r: currentStroke.r };
       appendPoint(pos);
@@ -291,6 +285,9 @@
     function onPointerMove(ev) {
       const pos = clientToImage(ev.clientX, ev.clientY);
       hover = pos ? { x: pos.x, y: pos.y, r: imageRadiusFromCss() } : null;
+      hoverErase = painting
+        ? !!(currentStroke && currentStroke.erase)
+        : ev.metaKey || ev.buttons === 2;
       if (painting && pos) {
         ev.preventDefault();
         appendPoint(pos);
@@ -308,12 +305,15 @@
           overlay.releasePointerCapture(ev.pointerId);
         } catch (_) {}
       }
+      rebuildSelection();
+      drawOverlay();
       onChange();
     }
 
     function onPointerLeave() {
       if (!painting) {
         hover = null;
+        hoverErase = false;
         drawOverlay();
       }
     }
@@ -325,6 +325,9 @@
       strokes = [];
       currentStroke = null;
       hover = null;
+      hoverErase = false;
+      selected = new Set();
+      cropOnlyPaint = false;
       stage.hidden = false;
       resizeCanvases();
       onChange();
@@ -338,55 +341,70 @@
       strokes = [];
       currentStroke = null;
       hover = null;
-      mask.width = 0;
-      mask.height = 0;
+      hoverErase = false;
+      selected = new Set();
+      cropOnlyPaint = false;
       stage.hidden = true;
     }
 
     function setGrid(nextGrid) {
       grid = nextGrid;
+      rebuildSelection();
       drawOverlay();
     }
 
     function clearSelection() {
       strokes = [];
       currentStroke = null;
-      if (mask.width && mask.height) {
-        maskCtx.clearRect(0, 0, mask.width, mask.height);
-      }
+      selected = new Set();
+      cropOnlyPaint = false;
       drawOverlay();
       onChange();
     }
 
-    /**
-     * Flatten strokes to circle stamps in image space for eligibility tests.
-     * Samples along each stroke so fast flicks still mark crossed tiles.
-     */
-    function getStamps() {
-      const stamps = [];
-      for (let s = 0; s < strokes.length; s++) {
-        const stroke = strokes[s];
-        const pts = stroke.points;
-        const r = stroke.r;
-        if (!pts.length) continue;
-        stamps.push({ x: pts[0].x, y: pts[0].y, r });
-        for (let i = 1; i < pts.length; i++) {
-          const a = pts[i - 1];
-          const b = pts[i];
-          const dist = Math.hypot(b.x - a.x, b.y - a.y);
-          const step = Math.max(2, r * 0.7);
-          const n = Math.max(1, Math.ceil(dist / step));
-          for (let k = 1; k <= n; k++) {
-            const t = k / n;
-            stamps.push({
-              x: a.x + (b.x - a.x) * t,
-              y: a.y + (b.y - a.y) * t,
-              r: r,
-            });
-          }
-        }
+    function applyBrushSize(next) {
+      const min = Number(brushSizeEl.min);
+      const max = Number(brushSizeEl.max);
+      const lo = Number.isFinite(min) ? min : 8;
+      const hi = Number.isFinite(max) ? max : 90;
+      const value = Math.min(hi, Math.max(lo, next));
+      brushSizeEl.value = String(value);
+      updateBrushLabel();
+      const r = imageRadiusFromCss();
+      if (currentStroke) currentStroke.r = r;
+      if (hover) hover.r = r;
+      if (currentStroke) {
+        rebuildSelection();
       }
-      return stamps;
+      drawOverlay();
+    }
+
+    function nudgeBrush(direction) {
+      applyBrushSize(brushCssRadius() + direction * BRUSH_NUDGE);
+    }
+
+    function isTypingTarget(el) {
+      if (!el || !el.tagName) return false;
+      const tag = el.tagName;
+      if (tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT") {
+        const type = (el.type || "text").toLowerCase();
+        return type !== "range" && type !== "button" && type !== "file" && type !== "checkbox";
+      }
+      return !!el.isContentEditable;
+    }
+
+    function onKeyDown(ev) {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (isTypingTarget(ev.target)) return;
+      // Physical keys (US [ / ]); Russian layout types х / ъ on the same positions.
+      if (ev.code === "BracketLeft" || ev.key === "[") {
+        ev.preventDefault();
+        nudgeBrush(-1);
+      } else if (ev.code === "BracketRight" || ev.key === "]") {
+        ev.preventDefault();
+        nudgeBrush(1);
+      }
     }
 
     overlay.addEventListener("pointerdown", onPointerDown);
@@ -394,12 +412,14 @@
     overlay.addEventListener("pointerup", endStroke);
     overlay.addEventListener("pointercancel", endStroke);
     overlay.addEventListener("pointerleave", onPointerLeave);
-    brushSizeEl.addEventListener("input", () => {
-      updateBrushLabel();
-      if (hover) hover.r = imageRadiusFromCss();
-      drawOverlay();
+    overlay.addEventListener("contextmenu", function (ev) {
+      ev.preventDefault();
+    });
+    brushSizeEl.addEventListener("input", function () {
+      applyBrushSize(brushCssRadius());
     });
     clearBtn.addEventListener("click", clearSelection);
+    window.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", () => {
       if (image) resizeCanvases();
     });
@@ -418,7 +438,8 @@
       clearImage,
       setGrid,
       clearSelection,
-      getStamps,
+      getEligibleTiles,
+      getStrokes,
       hasPaint,
       resize: resizeCanvases,
     };

@@ -50,7 +50,7 @@ Out of scope: platform-native apps, servers, frameworks, bundlers.
 | `app.js` | UI wiring only (file pick, preview/brush events, validation display, generate loop callbacks, downloads) |
 | `shuffle-core.js` | Pure algorithm: grid, CHAOS math, brush-eligible tiles, selection, derangement, seed/RNG, filenames, validation |
 | `shuffle-image.js` | Browser image I/O: load, render tiles to canvas, JPEG encode, sequential multi-variant generation |
-| `preview.js` | Input photo preview, grid overlay, round brush painting, checkerboard mask display |
+| `preview.js` | Input photo preview, grid overlay, round brush paint/erase, tile-snapped mask |
 | `core-tests.js` | Shared PhotoShuffleCore assertions (browser + Node) |
 | `tests.html` | In-browser runner for `core-tests.js` |
 | `run-tests.js` | Node runner (`node run-tests.js`) |
@@ -75,9 +75,11 @@ Keep algorithm logic out of `app.js`. Core must remain unit-testable without DOM
 
 **Eligible pool**
 
-- No brush paint → `ELIGIBLE = TILES` (every tile; original behavior).
-- Any brush paint → `ELIGIBLE` = number of tiles whose rectangle **intersects** any brush stamp (circle). Paint on the cropped-off right/bottom strip does not touch tiles.
-- Brush paint that hits zero tiles → `ELIGIBLE = 0` → no moves (this is not the same as “no selection”).
+- No brush mask → `ELIGIBLE = TILES` (every tile; original behavior).
+- A mask is active when at least one tile is selected, or when paint landed only on the cropped-off strip (zero tiles).
+- A tile is selected if a **paint** stamp’s circle intersects that tile rectangle. A later **erase** stamp that intersects the same tile deselects it. Strokes apply in order.
+- Erasing every selected tile returns to “no mask” (`ELIGIBLE = TILES`). Paint that never hits a tile (crop strip only) → `ELIGIBLE = 0` → no moves.
+- Paint/erase on the cropped-off right/bottom strip does not touch tiles.
 
 `AFFECTED_TILES = floor(ELIGIBLE × CHAOS)`, then:
 
@@ -111,9 +113,9 @@ For each of `N_OUT` variants, independently (always from the **original** loaded
 4. Build a **derangement** among those sampled positions only (`createDerangementMap` via **Sattolo’s algorithm**).
 5. Produce `sourceForDest[dest] = source` (identity outside the sampled set).
 
-Brush stamps are circles in **source image pixel space** (top-left origin, aligned with the crop). A tile is touched if the circle intersects the tile rectangle.
+Brush stamps are circles in **source image pixel space** (top-left origin, aligned with the crop). A tile is touched if the circle intersects the tile rectangle. Eligibility is sampled from stroke points as `{x, y, r, erase}` — not a freehand bitmap.
 
-Each pointer stroke is independent: lifting the pointer and painting again starts a new, disconnected region (e.g. upper-left and lower-right). The preview paints strokes onto an incremental mask; it does not join all stamps into one path. Eligibility is sampled from stroke points as `{x, y, r}` — not a full-resolution bitmap.
+Each pointer stroke is independent. Left-drag **paints** (adds tiles); right-drag **erases** (removes tiles). On Mac, Command-click (drag) erases. The preview shows the **whole tile** as masked once any stamp touches it (snap-to-grid). Changing HOR/VER recomputes which tiles the same strokes hit.
 
 Invariants for every plan:
 
@@ -170,8 +172,9 @@ Controls: file picker, HOR, VER, CHAOS (range + label), N_OUT, optional SEED, Ge
 After a JPEG is loaded, show the input photo on screen with:
 
 - Grid lines for the current HOR×VER (on the cropped region).
-- A **round, resizable** brush to paint regions that may be shuffled.
-- Painted regions as a **semi-transparent checkerboard**.
+- A **round, resizable** brush. Left-drag paints tiles that may be shuffled; right-drag (Command-click drag on Mac) erases them.
+- Touched tiles shown as a **full-tile** semi-transparent checkerboard (not a freehand trail).
+- `[` / `]` shrink / grow the brush (physical keys, so Russian `х` / `ъ` work too). Ignored while a text or number field is focused.
 - **Clear selection** to discard the brush mask and start over (then all tiles are eligible again).
 
 The preview may be CSS/canvas-scaled for display. Brush stamps and tile eligibility stay in full image pixel space.
@@ -203,6 +206,10 @@ Core tests live in `core-tests.js` (see `tests.html` / `run-tests.js`) and cover
 - Brush-eligible subset: only those indices may move; CHAOS is a fraction of the eligible set.
 - Empty eligible set → zero moves.
 - Circle/tile intersection used to mark touched tiles.
+- Paint then erase of the same tiles returns to no mask; crop-strip-only paint yields an empty eligible set.
+- Paint then erase of the same tile → no mask.
+- Erase-only strokes → no mask.
+- Sequential paint / erase / paint restores the tile.
 
 ---
 
@@ -226,6 +233,6 @@ Core tests live in `core-tests.js` (see `tests.html` / `run-tests.js`) and cover
 - Outputs with CHAOS that yields 0 moves are intentionally identical (re-encode only).
 - No drag-and-drop or progress cancel yet.
 - No ZIP download of all variants.
-- Brush is paint-only (no eraser besides Clear selection).
+- Brush erase uses right-click or Mac Command-click; there is no separate eraser tool.
 
 When changing behavior, update this file and extend `tests.html` / `run-tests.js` accordingly.
