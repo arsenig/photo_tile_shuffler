@@ -20,6 +20,16 @@ The same glass building, shuffled two ways. With **apply subtle chaos** and CHAO
 | --- | --- | --- |
 | ![Glass building along a path, before shuffling](examples/building_before.jpg) | ![The same building with subtle chaos at 0.12](examples/building_after_subtle.jpg) | ![The same building shuffled at random with chaos 0.06](examples/building_after.jpg) |
 
+## Masking
+
+Paint the preview to choose which tiles may move. The brush is a circle: every tile it touches is selected, and the preview fills that whole tile with a checker. Tiles you never touch stay where they are.
+
+CHAOS then applies only to the painted tiles, not to the whole photo. Below, the tree is painted on a 6 × 8 grid — 18 tiles. At CHAOS `0.25`, four of those eighteen can move. The houses are outside the mask, so they stay put. Leave the preview unpainted and every tile is eligible.
+
+![Preview with the tree tiles painted so only they can be shuffled](examples/masking.jpg)
+
+Left-drag paints and right-drag erases (Command-click on Mac). `[` and `]` change the brush size. Ctrl+Z undoes the last stroke. **Clear selection** removes the mask.
+
 ## Usage
 
 1. Choose a JPEG.
