@@ -2,6 +2,14 @@
 
 Split a JPEG into a grid, shuffle some of the tiles, and save full-resolution variants. Everything runs locally in the browser — open `index.html` and pick a photo.
 
+## Example
+
+The same chimney, before and after. The photo is cut into a grid and some tiles trade places; the rest stay where they were. Here, pieces of sky, brick, and metal have moved.
+
+| Before | After |
+| --- | --- |
+| ![Brick chimney against a blue sky, before shuffling](examples/example_chimney_before.jpg) | ![The same chimney after some tiles were rearranged](examples/example_chimney_after.jpg) |
+
 ## Usage
 
 1. Choose a JPEG.
